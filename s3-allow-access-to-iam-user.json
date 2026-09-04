@@ -1,0 +1,36 @@
+{
+   "Version": "2012-10-17",
+   "Statement": [
+      {
+         "Sid": "statement1",
+         "Effect": "Allow",
+         "Principal": {
+            "AWS": "arn:aws:iam::111122223333:user/iam-hogeuser22"
+         },
+         "Action": [
+            "s3:GetBucketLocation",
+            "s3:ListBucket"
+         ],
+         "Resource": [
+            "arn:aws:s3:::my-share-bucket777"
+         ]
+      },
+      {
+         "Sid": "statement2",
+         "Effect": "Allow",
+         "Principal": {
+            "AWS": "arn:aws:iam::111122223333:user/iam-hogeuser22"
+         },
+         "Action": [
+            "s3:PutObject",
+            "s3:PutObjectAcl",
+            "s3:GetObject",
+            "s3:GetObjectAcl",
+            "s3:DeleteObject"
+         ],
+         "Resource": [
+            "arn:aws:s3:::my-share-bucket777/*"
+         ]
+      }
+   ]
+}
