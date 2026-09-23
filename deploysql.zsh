@@ -1,20 +1,41 @@
 # deploysql.zsh
-# Downloads にある最新の technote_*.sql / estate_*.sql を
-# SSH 経由で CORESERVER の MySQL に投入する。
-#
-# CORESERVER 側 ~/.my.cnf に以下のグループが必要:
-#   [client-technote]
-#   [client-estate]
+# Upload the newest matching SQL file in ~/Downloads directly to a remote MySQL client over SSH.
+# Environment-specific mappings live in ~/.config/deploysql/config.zsh and should not be committed.
 
-function deploysql() {
+deploysql() {
     local dir="$HOME/Downloads"
     local archive="$HOME/Desktop/deployed_sql"
-    local file base target timestamp dest answer
+    local config="$HOME/.config/deploysql/config.zsh"
+    local file base target timestamp dest answer pattern
 
-    # Downloads にある最新の対象 SQL を取得
-    file=$(find "$dir" -maxdepth 1 -type f \
-        \( -name 'technote_*.sql' -o -name 'estate_*.sql' \) \
-        -print0 2>/dev/null | xargs -0 ls -t 2>/dev/null | head -1)
+    if [[ ! -r "$config" ]]; then
+        echo "設定ファイルがありません: $config"
+        echo "deploysql_config.example.zsh を参考に作成してください。"
+        return 1
+    fi
+
+    # shellcheck disable=SC1090
+    source "$config"
+
+    if [[ -z "$DEPLOYSQL_SSH_HOST" || ${#DEPLOYSQL_RULES[@]} -eq 0 ]]; then
+        echo "deploysql の設定が不完全です: $config"
+        return 1
+    fi
+
+    # Build find conditions from configured filename patterns.
+    local -a find_args
+    find_args=("$dir" -maxdepth 1 -type f '(')
+    local first=1
+    for pattern target in ${(kv)DEPLOYSQL_RULES}; do
+        if (( ! first )); then
+            find_args+=(-o)
+        fi
+        find_args+=(-name "$pattern")
+        first=0
+    done
+    find_args+=(')' -print0)
+
+    file=$(find "${find_args[@]}" | xargs -0 ls -t 2>/dev/null | head -1)
 
     if [[ -z "$file" ]]; then
         echo "投入対象のSQLがありません。"
@@ -22,21 +43,25 @@ function deploysql() {
     fi
 
     base="${file:t}"
+    target=""
 
-    # ファイル名から接続先を判定
-    case "$base" in
-        technote_*) target="technote" ;;
-        estate_*)   target="estate" ;;
-        *)
-            echo "DBを判定できません: $base"
-            return 1
-            ;;
-    esac
+    for pattern target_name in ${(kv)DEPLOYSQL_RULES}; do
+        if [[ "$base" == ${~pattern} ]]; then
+            target="$target_name"
+            break
+        fi
+    done
+
+    if [[ -z "$target" ]]; then
+        echo "投入先を判定できません: $base"
+        return 1
+    fi
 
     echo
     echo "----------------------------------------"
     echo " SQL : $base"
     echo " DB  : $target"
+    echo " HOST: $DEPLOYSQL_SSH_HOST"
     echo "----------------------------------------"
     echo
 
@@ -46,23 +71,17 @@ function deploysql() {
         return 0
     fi
 
-    # SQL はサーバーへ保存せず、そのまま標準入力で MySQL へ渡す
-    if ssh core "mysql --defaults-group-suffix=-$target" < "$file"; then
+    if ssh "$DEPLOYSQL_SSH_HOST" "mysql --defaults-group-suffix=-$target" < "$file"; then
         echo
         echo "DBへの投入に成功しました。"
 
-        mkdir -p "$archive" || return 1
+        mkdir -p "$archive"
         timestamp=$(date '+%Y%m%d_%H%M%S')
         dest="$archive/${timestamp}_${base}"
+        mv "$file" "$dest"
 
-        if mv "$file" "$dest"; then
-            echo "SQLを退避しました:"
-            echo "$dest"
-        else
-            echo "WARNING: DB投入には成功しましたが、SQLの退避に失敗しました。"
-            echo "再投入しないよう注意してください: $file"
-            return 1
-        fi
+        echo "SQLを退避しました:"
+        echo "$dest"
     else
         echo
         echo "ERROR: DBへの投入に失敗しました。"
